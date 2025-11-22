@@ -1,0 +1,811 @@
+{
+  "master": {
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Initialize Supabase Client",
+        "description": "Set up Supabase project and initialize the client in Next.js application.",
+        "details": "1. Create a new Supabase project at supabase.com\n2. Get the project URL and anon key from Settings > API\n3. Install @supabase/supabase-js package\n4. Create `src/lib/supabase.ts` with client initialization:\n```typescript\nimport { createClient } from '@supabase/supabase-js'\n\nconst supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!\nconst supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!\n\nexport const supabase = createClient(supabaseUrl, supabaseKey)\n```\n5. Add environment variables to `.env.local`",
+        "testStrategy": "Verify Supabase client connects successfully by calling `supabase.auth.getSession()` and checking for no errors. Test that environment variables are loaded correctly.",
+        "priority": "high",
+        "dependencies": [],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 2,
+        "title": "Create Database Schema with RLS",
+        "description": "Set up the `bill_analyses` table in Supabase Database with Row Level Security policies.",
+        "details": "Run the following SQL in Supabase SQL Editor:\n```sql\nCREATE TABLE bill_analyses (\n  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,\n  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,\n  file_url TEXT NOT NULL,\n  total_amount DECIMAL(10,2),\n  usage_kwh DECIMAL(10,2),\n  previous_usage_kwh DECIMAL(10,2),\n  breakdown_json JSONB,\n  tips_json JSONB,\n  raw_response JSONB,\n  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()\n);\n\nALTER TABLE bill_analyses ENABLE ROW LEVEL SECURITY;\n\nCREATE POLICY \"Users can view own analyses\" ON bill_analyses\n  FOR SELECT USING (auth.uid() = user_id);\n\nCREATE POLICY \"Users can insert own analyses\" ON bill_analyses\n  FOR INSERT WITH CHECK (auth.uid() = user_id);\n```",
+        "testStrategy": "Verify table creation in Supabase Dashboard > Table Editor. Test RLS by attempting to insert/select records with different user contexts.",
+        "priority": "high",
+        "dependencies": [
+          1
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 3,
+        "title": "Set Up Supabase Storage Bucket",
+        "description": "Create the `bill-uploads` storage bucket for file uploads with appropriate access policies.",
+        "details": "1. Go to Supabase Dashboard > Storage\n2. Create a new bucket named `bill-uploads`\n3. Set bucket to public (for Edge Function access)\n4. Add storage policies via SQL:\n```sql\nCREATE POLICY \"Authenticated users can upload\" ON storage.objects\n  FOR INSERT WITH CHECK (\n    bucket_id = 'bill-uploads' AND\n    auth.role() = 'authenticated'\n  );\n\nCREATE POLICY \"Public read access\" ON storage.objects\n  FOR SELECT USING (bucket_id = 'bill-uploads');\n```",
+        "testStrategy": "Test file upload via Supabase client: `supabase.storage.from('bill-uploads').upload()`. Verify public URL access for uploaded files.",
+        "priority": "high",
+        "dependencies": [
+          1
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 4,
+        "title": "Create Core UI Components",
+        "description": "Build reusable UI components: UploadCard, ResultCards, TipsList, and LoadingSpinner.",
+        "details": "Create the following components in `src/components/`:\n\n1. `upload-card.tsx` - File upload with drag & drop\n   - Accept image/pdf files\n   - Validate file type and size (max 10MB)\n   - Show file preview\n   - Emit onUpload callback with File object\n\n2. `result-cards.tsx` - Display analysis results\n   - Total amount card\n   - Usage kWh card with comparison\n   - Breakdown chart (pie/bar)\n\n3. `tips-list.tsx` - Display AI-generated tips\n   - List of saving recommendations\n   - Icons for each tip category\n\n4. `loading-spinner.tsx` - Multi-step loading\n   - Rotating messages prop\n   - Progress indicator",
+        "testStrategy": "Write unit tests for each component with React Testing Library. Test file validation logic, responsive rendering, and prop handling.",
+        "priority": "high",
+        "dependencies": [],
+        "status": "done",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Develop UploadCard Component",
+            "description": "Create the UploadCard component for file uploads with drag & drop functionality.",
+            "dependencies": [],
+            "details": "Implement the UploadCard component in `src/components/upload-card.tsx`. Ensure it accepts image/pdf files, validates file type and size (max 10MB), shows file preview, and emits an onUpload callback with the File object.",
+            "status": "done",
+            "testStrategy": "Write unit tests to validate file type and size, test drag & drop functionality, and ensure the onUpload callback is triggered correctly."
+          },
+          {
+            "id": 2,
+            "title": "Create ResultCards Component",
+            "description": "Build the ResultCards component to display analysis results.",
+            "dependencies": [
+              1
+            ],
+            "details": "Develop the ResultCards component in `src/components/result-cards.tsx`. Include a total amount card, a usage kWh card with comparison, and a breakdown chart (pie/bar).",
+            "status": "done",
+            "testStrategy": "Test the rendering of each card and chart with mock data. Verify responsive design and prop handling."
+          },
+          {
+            "id": 3,
+            "title": "Implement TipsList and LoadingSpinner Components",
+            "description": "Develop the TipsList and LoadingSpinner components for displaying AI tips and loading states.",
+            "dependencies": [
+              2
+            ],
+            "details": "Create the TipsList component in `src/components/tips-list.tsx` to show AI-generated tips with icons. Develop the LoadingSpinner component in `src/components/loading-spinner.tsx` with rotating messages and a progress indicator.",
+            "status": "done",
+            "testStrategy": "Test the display of tips with various categories and icons. Verify the LoadingSpinner's progress indicator and message rotation functionality."
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "Implement Supabase Auth Integration",
+        "description": "Set up authentication using Supabase Auth with email/password and Google OAuth.",
+        "details": "1. Create `src/auth/login.ts`:\n```typescript\nexport async function signIn(email: string, password: string) {\n  const { data, error } = await supabase.auth.signInWithPassword({ email, password })\n  return { data, error }\n}\n\nexport async function signInWithGoogle() {\n  const { data, error } = await supabase.auth.signInWithOAuth({\n    provider: 'google',\n    options: { redirectTo: window.location.origin }\n  })\n  return { data, error }\n}\n```\n\n2. Create `src/auth/logout.ts`:\n```typescript\nexport async function signOut() {\n  const { error } = await supabase.auth.signOut()\n  return { error }\n}\n```\n\n3. Enable Google OAuth in Supabase Dashboard > Authentication > Providers",
+        "testStrategy": "Test sign up, sign in, sign out flows. Verify session persistence across page reloads. Test OAuth redirect flow.",
+        "priority": "medium",
+        "dependencies": [
+          1
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 6,
+        "title": "Create Auth Context Provider",
+        "description": "Implement React Context for global auth state management with Supabase session.",
+        "details": "Create `src/auth/user-state.ts`:\n```typescript\n'use client'\nimport { createContext, useContext, useEffect, useState } from 'react'\nimport { User, Session } from '@supabase/supabase-js'\nimport { supabase } from '@/lib/supabase'\n\ntype AuthContextType = {\n  user: User | null\n  session: Session | null\n  loading: boolean\n}\n\nconst AuthContext = createContext<AuthContextType>({ user: null, session: null, loading: true })\n\nexport function AuthProvider({ children }) {\n  const [user, setUser] = useState<User | null>(null)\n  const [session, setSession] = useState<Session | null>(null)\n  const [loading, setLoading] = useState(true)\n\n  useEffect(() => {\n    supabase.auth.getSession().then(({ data: { session } }) => {\n      setSession(session)\n      setUser(session?.user ?? null)\n      setLoading(false)\n    })\n\n    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {\n      setSession(session)\n      setUser(session?.user ?? null)\n    })\n\n    return () => subscription.unsubscribe()\n  }, [])\n\n  return <AuthContext.Provider value={{ user, session, loading }}>{children}</AuthContext.Provider>\n}\n\nexport const useUser = () => useContext(AuthContext)\n```",
+        "testStrategy": "Test auth state updates on login/logout. Verify onAuthStateChange listener works correctly. Test loading state during initial session check.",
+        "priority": "medium",
+        "dependencies": [
+          5
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 7,
+        "title": "Build Login Page UI",
+        "description": "Create the login page with email/password form and Google OAuth button.",
+        "details": "Create `src/app/login/page.tsx`:\n- Email input field with validation\n- Password input field\n- Sign In button (calls signIn())\n- Sign Up button (calls signUp())\n- 'Continue with Google' button (calls signInWithGoogle())\n- Error message display\n- Redirect to home after successful login\n- Use Tailwind CSS for styling\n- Make it responsive for mobile",
+        "testStrategy": "Test form validation, error display, successful login redirect. Test Google OAuth button triggers redirect. Test accessibility (keyboard navigation, screen reader).",
+        "priority": "medium",
+        "dependencies": [
+          4,
+          5,
+          6
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 8,
+        "title": "Implement File Upload to Supabase Storage",
+        "description": "Create upload function that stores bill files in Supabase Storage and returns public URL.",
+        "details": "Create `src/analysis/upload.ts`:\n```typescript\nimport { supabase } from '@/lib/supabase'\n\nexport async function uploadBillFile(file: File): Promise<{ url: string | null, error: Error | null }> {\n  // Validate file\n  const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']\n  if (!allowedTypes.includes(file.type)) {\n    return { url: null, error: new Error('Invalid file type') }\n  }\n  if (file.size > 10 * 1024 * 1024) {\n    return { url: null, error: new Error('File too large (max 10MB)') }\n  }\n\n  // Generate unique filename\n  const fileName = `${Date.now()}-${file.name}`\n  \n  // Upload to Supabase Storage\n  const { data, error } = await supabase.storage\n    .from('bill-uploads')\n    .upload(fileName, file)\n\n  if (error) return { url: null, error }\n\n  // Get public URL\n  const { data: { publicUrl } } = supabase.storage\n    .from('bill-uploads')\n    .getPublicUrl(data.path)\n\n  return { url: publicUrl, error: null }\n}\n```",
+        "testStrategy": "Test file validation (type, size). Test successful upload returns valid URL. Test error handling for upload failures. Mock Supabase storage for unit tests.",
+        "priority": "medium",
+        "dependencies": [
+          1,
+          3,
+          4
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 9,
+        "title": "Deploy Analyze-Bill Edge Function",
+        "description": "Create and deploy Supabase Edge Function that processes bill images using AI.",
+        "details": "1. Initialize Supabase CLI: `supabase init`\n2. Create function: `supabase functions new analyze-bill`\n3. Implement `supabase/functions/analyze-bill/index.ts`:\n```typescript\nimport { serve } from 'https://deno.land/std@0.168.0/http/server.ts'\n\nserve(async (req) => {\n  const { fileUrl } = await req.json()\n\n  // Download image from Storage\n  const imageResponse = await fetch(fileUrl)\n  const imageBuffer = await imageResponse.arrayBuffer()\n  const base64 = btoa(String.fromCharCode(...new Uint8Array(imageBuffer)))\n\n  // Call OpenAI Vision API\n  const response = await fetch('https://api.openai.com/v1/chat/completions', {\n    method: 'POST',\n    headers: {\n      'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,\n      'Content-Type': 'application/json',\n    },\n    body: JSON.stringify({\n      model: 'gpt-4o',\n      messages: [{\n        role: 'user',\n        content: [\n          { type: 'text', text: 'Analyze this electricity bill. Extract: total amount, usage in kWh, previous usage, breakdown of charges, and provide 3-5 money-saving tips. Return as JSON.' },\n          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` }}\n        ]\n      }],\n      max_tokens: 2000,\n    }),\n  })\n\n  const result = await response.json()\n  // Parse and return structured data\n  return new Response(JSON.stringify(parsedResult), {\n    headers: { 'Content-Type': 'application/json' },\n  })\n})\n```\n4. Set OPENAI_API_KEY in Supabase Dashboard > Edge Functions > Secrets\n5. Deploy: `supabase functions deploy analyze-bill`",
+        "testStrategy": "Test Edge Function locally with `supabase functions serve`. Test with sample bill images. Verify JSON response structure. Test error handling for invalid images.",
+        "priority": "high",
+        "dependencies": [
+          1,
+          3
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 10,
+        "title": "Implement AnalyzeBill Function",
+        "description": "Create frontend function that invokes the Edge Function and handles the response.",
+        "details": "Create `src/analysis/analyze.ts`:\n```typescript\nimport { supabase } from '@/lib/supabase'\n\nexport type AnalysisResult = {\n  total_amount: number\n  usage_kwh: number\n  previous_usage_kwh: number | null\n  breakdown_json: Record<string, number>\n  tips_json: string[]\n}\n\nexport async function analyzeBill(fileUrl: string): Promise<{ data: AnalysisResult | null, error: Error | null }> {\n  const { data, error } = await supabase.functions.invoke('analyze-bill', {\n    body: { fileUrl }\n  })\n\n  if (error) return { data: null, error }\n  return { data: data as AnalysisResult, error: null }\n}\n```\n\nCreate `src/analysis/loading-state.ts` for managing loading messages:\n```typescript\nexport const loadingMessages = [\n  'Uploading your bill...',\n  'Extracting text from image...',\n  'Analyzing charges...',\n  'Comparing with previous usage...',\n  'Generating saving tips...'\n]\n```",
+        "testStrategy": "Test Edge Function invocation. Test response parsing. Test error handling for function failures. Test loading state management.",
+        "priority": "medium",
+        "dependencies": [
+          8,
+          9
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 11,
+        "title": "Build Analysis Dashboard Page",
+        "description": "Create the main page with upload UI, loading states, and result display.",
+        "details": "Create `src/app/page.tsx`:\n1. Upload section using UploadCard component\n2. Handle file selection and upload to Storage\n3. Show LoadingSpinner with rotating messages during analysis\n4. Display ResultCards and TipsList after analysis completes\n5. Show error toast on failure\n6. Add 'Analyze Another' button to reset state\n\nState flow:\n- idle → uploading → analyzing → complete/error\n\nUse React state or Zustand for state management.",
+        "testStrategy": "Test complete flow: upload → loading → results. Test error states. Test 'Analyze Another' reset. Test responsive layout.",
+        "priority": "medium",
+        "dependencies": [
+          4,
+          8,
+          10
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 12,
+        "title": "Implement Save Analysis to Database",
+        "description": "Create function to save analysis results to Supabase Database for logged-in users.",
+        "details": "Create `src/history/save.ts`:\n```typescript\nimport { supabase } from '@/lib/supabase'\nimport { AnalysisResult } from '@/analysis/analyze'\n\nexport async function saveAnalysis(\n  userId: string,\n  fileUrl: string,\n  analysis: AnalysisResult\n): Promise<{ error: Error | null }> {\n  const { error } = await supabase\n    .from('bill_analyses')\n    .insert({\n      user_id: userId,\n      file_url: fileUrl,\n      total_amount: analysis.total_amount,\n      usage_kwh: analysis.usage_kwh,\n      previous_usage_kwh: analysis.previous_usage_kwh,\n      breakdown_json: analysis.breakdown_json,\n      tips_json: analysis.tips_json,\n    })\n\n  return { error }\n}\n```\n\nIntegrate into dashboard: auto-save after successful analysis if user is logged in.",
+        "testStrategy": "Test insertion with valid data. Test RLS blocks unauthenticated inserts. Test error handling for database failures.",
+        "priority": "low",
+        "dependencies": [
+          2,
+          6,
+          10
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 13,
+        "title": "Build History List Page",
+        "description": "Create page to display user's past bill analyses from Supabase Database.",
+        "details": "Create `src/history/list.ts`:\n```typescript\nexport async function fetchHistory(userId: string) {\n  const { data, error } = await supabase\n    .from('bill_analyses')\n    .select('id, total_amount, usage_kwh, created_at')\n    .eq('user_id', userId)\n    .order('created_at', { ascending: false })\n\n  return { data, error }\n}\n```\n\nCreate `src/app/history/page.tsx`:\n- Protected route (redirect if not logged in)\n- Display HistoryTable component with list\n- Show empty state if no history\n- Link each row to detail page",
+        "testStrategy": "Test data fetching for logged-in user. Test empty state display. Test protected route redirect. Test RLS rㄴeturns only user's data.",
+        "priority": "low",
+        "dependencies": [
+          2,
+          4,
+          6,
+          12
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 14,
+        "title": "Build History Detail Page",
+        "description": "Create page to display a single past analysis using the same components as dashboard.",
+        "details": "Create `src/history/detail.ts`:\n```typescript\nexport async function fetchHistoryDetail(billId: string) {\n  const { data, error } = await supabase\n    .from('bill_analyses')\n    .select('*')\n    .eq('id', billId)\n    .single()\n\n  return { data, error }\n}\n```\n\nCreate `src/app/history/[id]/page.tsx`:\n- Fetch analysis by ID from URL params\n- Reuse ResultCards and TipsList components\n- Show 'Back to History' link\n- Handle not found / unauthorized access",
+        "testStrategy": "Test fetching single record. Test 404 handling for invalid ID. Test RLS blocks access to other users' records.",
+        "priority": "low",
+        "dependencies": [
+          4,
+          13
+        ],
+        "status": "done",
+        "subtasks": []
+      },
+      {
+        "id": 20,
+        "title": "Create Analysis Result Display",
+        "description": "Render analysis results including charts, breakdowns, and AI tips on the dashboard. Implement the Desktop-4 design from Figma.",
+        "status": "done",
+        "dependencies": [
+          11
+        ],
+        "priority": "medium",
+        "details": "Use components like ResultCard and TipsList to display analysis data. Implement complex charts using Recharts, including bar and line combinations. Develop AI cause analysis and action plan card UI. Replace or extend the existing ResultCard component as necessary.",
+        "testStrategy": "Verify that all analysis data is displayed correctly according to the Desktop-4 design. Test with different data sets to ensure UI adaptability and accuracy of complex charts. Ensure AI cards display correct information.",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Implement Summary Cards",
+            "description": "Develop the Current Bill, Usage, and Forecast summary cards using existing components.",
+            "dependencies": [],
+            "details": "Use the ResultCard component to create summary cards for Current Bill, Usage, and Forecast. Ensure data is fetched and displayed correctly.",
+            "status": "done",
+            "testStrategy": "Verify each card displays the correct data and updates dynamically."
+          },
+          {
+            "id": 2,
+            "title": "Create Monthly Usage Trend Graph",
+            "description": "Develop a graph to display monthly usage trends using Recharts.",
+            "dependencies": [
+              1
+            ],
+            "details": "Use Recharts to implement a combination of bar and line charts for monthly usage trends. Ensure it integrates with the existing data structure.",
+            "status": "done",
+            "testStrategy": "Test with various data sets to ensure accuracy and responsiveness."
+          },
+          {
+            "id": 3,
+            "title": "Develop AI Root-Cause Analysis & Action Plan Cards",
+            "description": "Create UI components for AI-generated root-cause analysis and action plans.",
+            "dependencies": [
+              1
+            ],
+            "details": "Design and implement cards that display AI-generated insights and action plans. Ensure they are visually integrated with the dashboard.",
+            "status": "done",
+            "testStrategy": "Check that AI insights are displayed correctly and update as expected."
+          },
+          {
+            "id": 4,
+            "title": "Integrate Components into Result Page",
+            "description": "Combine all components into the Result Page following the Desktop-4 layout.",
+            "dependencies": [
+              2,
+              3
+            ],
+            "details": "Integrate the summary cards, trend graph, and AI analysis cards into the Result Page. Ensure the layout matches the Desktop-4 design from Figma.",
+            "status": "done",
+            "testStrategy": "Verify the overall layout and functionality against the Figma design. Test for responsiveness and data accuracy."
+          }
+        ]
+      },
+      {
+        "id": 21,
+        "title": "Implement Global Layout & Sidebar",
+        "description": "Implement the global layout and sidebar component based on Figma designs (Desktop-1/2).",
+        "details": "1. Configure Google Fonts (Russo One, Inter, Outfit) in `src/app/layout.tsx`.\\n2. Create `src/components/sidebar.tsx` implementing the design from Figma:\\n   - Fixed width 260px\\n   - Logo 'WattGuard' (Russo One)\\n   - Menu items: Dashboard, History (with active states)\\n3. Update `src/app/layout.tsx` to include the Sidebar globally.\\n4. Adjust main content area to have appropriate margin/padding.\\n5. Add global color variables in `globals.css` if needed.",
+        "testStrategy": "Verify sidebar renders correctly on all pages. Check responsive behavior (if applicable, though fixed width for desktop). Verify font loading.",
+        "status": "done",
+        "dependencies": [
+          4,
+          6
+        ],
+        "priority": "high",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Configure Google Fonts in Layout",
+            "description": "Set up Google Fonts (Russo One, Inter, Outfit) in `src/app/layout.tsx`.",
+            "dependencies": [],
+            "details": "Import and configure the specified Google Fonts in the layout file to ensure consistent typography across the application.",
+            "status": "done",
+            "testStrategy": "Verify fonts load correctly on all pages."
+          },
+          {
+            "id": 2,
+            "title": "Create Sidebar Component",
+            "description": "Develop the sidebar component in `src/components/sidebar.tsx` based on Figma designs.",
+            "dependencies": [
+              1
+            ],
+            "details": "Implement the sidebar with a fixed width of 260px, including the 'WattGuard' logo and menu items (Dashboard, History) with active states.",
+            "status": "done",
+            "testStrategy": "Check sidebar rendering and active state functionality."
+          },
+          {
+            "id": 3,
+            "title": "Integrate Sidebar into Global Layout",
+            "description": "Update `src/app/layout.tsx` to include the Sidebar and adjust layout styles.",
+            "dependencies": [
+              2
+            ],
+            "details": "Modify the global layout to incorporate the sidebar and adjust the main content area for appropriate margin and padding. Add global color variables if necessary.",
+            "status": "done",
+            "testStrategy": "Ensure sidebar is visible on all pages and layout adjustments are correct."
+          }
+        ]
+      },
+      {
+        "id": 22,
+        "title": "Implement Dashboard Upload UI",
+        "description": "Implement the main dashboard file upload UI based on Figma Desktop-2 design.",
+        "details": "1. Update `src/components/upload-card.tsx` to match the 800x500px design with dotted border and specific styling.\\n2. Refactor `src/app/page.tsx` to remove the old header (since Sidebar is used) and implement the top-right Profile/Login section.\\n3. Ensure the drag & drop functionality works with the new UI.",
+        "testStrategy": "Verify visual match with Figma. Test drag and drop functionality. Check responsive behavior.",
+        "status": "done",
+        "dependencies": [
+          21
+        ],
+        "priority": "high",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Update UploadCard Component with Figma Design",
+            "description": "Modify `src/components/upload-card.tsx` to match the Figma Desktop-2 design specifications.",
+            "dependencies": [],
+            "details": "Ensure the component dimensions are 800x500px with a dotted border. Apply specific styling as per the Figma design. Implement any necessary CSS changes to achieve the desired look.",
+            "status": "done",
+            "testStrategy": "Verify visual match with Figma design. Check component responsiveness."
+          },
+          {
+            "id": 2,
+            "title": "Refactor Dashboard Page Layout and Header",
+            "description": "Refactor `src/app/page.tsx` to update the layout and remove the old header.",
+            "dependencies": [
+              1
+            ],
+            "details": "Remove the old header and integrate the Sidebar as per the new design. Implement the top-right Profile/Login section. Ensure drag & drop functionality is compatible with the new layout.",
+            "status": "done",
+            "testStrategy": "Test drag and drop functionality. Verify layout changes and header removal."
+          }
+        ]
+      },
+      {
+        "id": 23,
+        "title": "Integrate Analysis Logic & Real Data",
+        "description": "Integrate backend analysis logic with frontend components using real dynamic data instead of hardcoded values.",
+        "details": "1. Update `AnalysisResult` type in `src/analysis/analyze.ts` to include monthly usage trends and detailed AI analysis fields.\\n2. Modify Supabase Edge Function (`analyze-bill`) prompt to extract monthly usage data and specific root-cause analysis points.\\n3. Update `UsageChart`, `AIAnalysis`, and `SummaryCards` components to accept data via props.\\n4. Connect `page.tsx` to pass real analysis data to these components.",
+        "testStrategy": "Verify that uploaded bill data is correctly reflected in the charts and analysis cards. Check edge cases where data might be missing.",
+        "status": "done",
+        "dependencies": [
+          20,
+          22
+        ],
+        "priority": "high",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Update AnalysisResult Type",
+            "description": "Enhance the AnalysisResult type to include monthly usage trends and AI analysis fields.",
+            "dependencies": [],
+            "details": "Modify `src/analysis/analyze.ts` to add fields for monthly usage trends and detailed AI analysis.",
+            "status": "done",
+            "testStrategy": "Verify the type includes new fields and is used correctly in analysis logic."
+          },
+          {
+            "id": 2,
+            "title": "Modify Supabase Edge Function",
+            "description": "Update the `analyze-bill` function to extract monthly usage data and root-cause analysis points.",
+            "dependencies": [
+              1
+            ],
+            "details": "Edit the Edge Function prompt to handle new data extraction requirements for monthly trends and root-cause analysis.",
+            "status": "done",
+            "testStrategy": "Test function with sample data to ensure correct extraction and processing."
+          },
+          {
+            "id": 3,
+            "title": "Connect Frontend Components with Real Data",
+            "description": "Update components to accept dynamic data and integrate with the backend.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Modify `UsageChart`, `AIAnalysis`, and `SummaryCards` to accept props and connect `page.tsx` to pass real data.",
+            "status": "done",
+            "testStrategy": "Check that components render correctly with real data and handle missing data gracefully."
+          }
+        ]
+      },
+      {
+        "id": 24,
+        "title": "Unify Design System for Login & History Pages",
+        "description": "Update Login and History pages to match the new WattGuard design system (Green theme, English text, Russo One font). Replace old components in History Detail page with new reusable dashboard components.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Update Login Page to New Design System",
+            "description": "Apply the new WattGuard design system to the Login page, including green theme, English text, and Russo One font.",
+            "dependencies": [],
+            "details": "Modify the Login page CSS to use the green theme. Update text to English and apply Russo One font. Ensure all components align with the new design guidelines.",
+            "status": "done",
+            "testStrategy": "Verify visual consistency with design mockups. Check font and color scheme."
+          },
+          {
+            "id": 2,
+            "title": "Update History Page to New Design System",
+            "description": "Apply the new WattGuard design system to the History page, including green theme, English text, and Russo One font.",
+            "dependencies": [
+              1
+            ],
+            "details": "Modify the History page CSS to use the green theme. Update text to English and apply Russo One font. Ensure all components align with the new design guidelines.",
+            "status": "done",
+            "testStrategy": "Verify visual consistency with design mockups. Check font and color scheme."
+          },
+          {
+            "id": 3,
+            "title": "Replace Components in History Detail Page",
+            "description": "Replace old components in the History Detail page with new reusable dashboard components.",
+            "dependencies": [
+              2
+            ],
+            "details": "Identify old components in the History Detail page and replace them with the new reusable dashboard components. Ensure functionality remains intact.",
+            "status": "done",
+            "testStrategy": "Test component functionality and integration. Verify visual consistency with the new design system."
+          }
+        ]
+      },
+      {
+        "id": 25,
+        "title": "Update Supabase Schema & Data Persistence",
+        "description": "Update Supabase DB schema and TypeScript types to support new analysis data fields (monthly_usage, ai_analysis, action_plan, next_month_forecast). Update save/fetch logic to handle these fields.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Modify Supabase Schema for New Fields",
+            "description": "Add new fields to the existing Supabase schema to support analysis data.",
+            "dependencies": [],
+            "details": "Update the `bill_analyses` table to include `monthly_usage`, `ai_analysis`, `action_plan`, and `next_month_forecast` fields. Use appropriate data types for each field and update any existing constraints or indexes as necessary.",
+            "status": "done",
+            "testStrategy": "Verify schema changes in Supabase Dashboard. Ensure new fields are visible and correctly typed."
+          },
+          {
+            "id": 2,
+            "title": "Update TypeScript Types for New Fields",
+            "description": "Revise TypeScript types to reflect changes in the Supabase schema.",
+            "dependencies": [
+              1
+            ],
+            "details": "Modify the TypeScript interfaces or types used in the application to include the new fields `monthly_usage`, `ai_analysis`, `action_plan`, and `next_month_forecast`. Ensure these types are used consistently across the application.",
+            "status": "done",
+            "testStrategy": "Run TypeScript compiler to check for type errors. Ensure all new fields are correctly typed and used."
+          },
+          {
+            "id": 3,
+            "title": "Revise Data Persistence Logic",
+            "description": "Update the logic for saving and fetching data to handle new fields.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Modify the existing data persistence logic to include the new fields in both save and fetch operations. Ensure that the application logic correctly handles these fields when interacting with the database.",
+            "status": "done",
+            "testStrategy": "Test data operations by creating, reading, updating, and deleting records with the new fields. Verify data integrity and correct handling of new fields."
+          }
+        ]
+      },
+      {
+        "id": 26,
+        "title": "Implement Interactive Savings & Forecast Update",
+        "description": "Implement interactive savings calculation: Clicking 'Apply' on Action Plan items should visually reduce the Next Month Forecast amount. This requires lifting state up to the page level and parsing savings values.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "high",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Lift State to Page Level",
+            "description": "Refactor the component to lift state to the page level for managing savings and forecast updates.",
+            "dependencies": [],
+            "details": "Identify the current component managing the state. Refactor the code to lift the state to the page level, ensuring that the savings and forecast updates are accessible globally on the page.",
+            "status": "done",
+            "testStrategy": "Test that state updates correctly when 'Apply' is clicked."
+          },
+          {
+            "id": 2,
+            "title": "Parse Savings Values",
+            "description": "Implement logic to parse savings values from Action Plan items.",
+            "dependencies": [
+              1
+            ],
+            "details": "Create a utility function to extract and parse savings values from the Action Plan items. Ensure the function returns the correct numerical value for savings.",
+            "status": "done",
+            "testStrategy": "Test parsing function with various Action Plan item formats."
+          },
+          {
+            "id": 3,
+            "title": "Update Forecast on Action Plan Apply",
+            "description": "Implement the functionality to update the Next Month Forecast when 'Apply' is clicked on Action Plan items.",
+            "dependencies": [
+              1,
+              2
+            ],
+            "details": "Add an event handler for the 'Apply' button that updates the Next Month Forecast using the parsed savings values. Ensure the UI reflects the updated forecast immediately.",
+            "status": "done",
+            "testStrategy": "Verify that clicking 'Apply' updates the forecast visually and accurately."
+          }
+        ]
+      },
+      {
+        "id": 27,
+        "title": "Implement AI Fair Bill Splitter",
+        "description": "Implement 'AI Fair Bill Splitter' feature based on Figma designs (Node 21:310). Includes a modal for managing roommates and their usage tags (e.g., Gaming PC, Work from Home) to calculate fair bill distribution.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create SplitBillModal Component Structure",
+            "description": "Develop the structure and UI for the SplitBillModal component.",
+            "dependencies": [],
+            "details": "Create the basic structure of the SplitBillModal component including roommate list, avatar, and tag selection as per Figma designs.\n<info added on 2025-11-22T16:51:44.048Z>\nUpdate the UI based on Desktop-5 feedback:\n\n1. **Left Panel**: Include a profile list featuring Kijun Park, Mike, Sarah, and an 'Add New Roommate' button at the bottom.\n2. **Right Panel**: Implement a tag library with pill-shaped styling using rounded-full, bg-[#F5F5F5], and text-dark-gray.\n3. **Footer**: Add a full-width CTA button labeled '✨ Next : Calculate Fair Split with AI' with bg-[#2E7D32] and text-white.\n</info added on 2025-11-22T16:51:44.048Z>",
+            "status": "done",
+            "testStrategy": "Verify UI matches Figma design."
+          },
+          {
+            "id": 2,
+            "title": "Implement Tag Selection Logic",
+            "description": "Add functionality for selecting and managing usage tags within the modal.",
+            "dependencies": [
+              1
+            ],
+            "details": "Implement logic to allow users to select and manage tags like 'Gaming PC' and 'Work from Home' within the modal.",
+            "status": "done",
+            "testStrategy": "Test tag selection and management functionality."
+          },
+          {
+            "id": 3,
+            "title": "Develop Fair Split Calculation Logic",
+            "description": "Create the logic to calculate fair bill distribution based on weighted tags.",
+            "dependencies": [
+              2
+            ],
+            "details": "Implement the calculation logic that adjusts bill distribution based on tags, e.g., 'Gaming PC' +20%, 'Outing' -10%.",
+            "status": "done",
+            "testStrategy": "Test calculation accuracy with various tag combinations."
+          },
+          {
+            "id": 4,
+            "title": "Integrate Split Bill Button into DashboardPage",
+            "description": "Add the 'Split Bill' button and integrate the modal into the DashboardPage.",
+            "dependencies": [
+              3
+            ],
+            "details": "Integrate the SplitBillModal and 'Split Bill' button into the DashboardPage, ensuring seamless interaction.",
+            "status": "done",
+            "testStrategy": "Verify button and modal integration on DashboardPage."
+          },
+          {
+            "id": 5,
+            "title": "Integrate Split Bill Button into HistoryDetailPage",
+            "description": "Add the 'Split Bill' button and integrate the modal into the HistoryDetailPage.",
+            "dependencies": [
+              4
+            ],
+            "details": "Integrate the SplitBillModal and 'Split Bill' button into the HistoryDetailPage, ensuring seamless interaction.",
+            "status": "done",
+            "testStrategy": "Verify button and modal integration on HistoryDetailPage."
+          },
+          {
+            "id": 6,
+            "title": "Implement Result Screen Transition (Desktop-6)",
+            "description": "",
+            "details": "Plan and implement the state transition from the Input Screen (Desktop-5) to the Result Screen (Desktop-6) within the SplitBillModal. Ensure data is passed correctly for the calculation display.",
+            "status": "done",
+            "dependencies": [],
+            "parentTaskId": 27
+          }
+        ]
+      },
+      {
+        "id": 28,
+        "title": "Refactor SplitBillModal: Custom Names & Defaults",
+        "description": "Refactor SplitBillModal to simplify default roommates and allow custom names when adding.\n1. Set default roommates to 2 people (e.g., 'Me' and 'Roommate 1').\n2. Implement input field to enter a name when adding a new roommate.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": []
+      },
+      {
+        "id": 29,
+        "title": "Implement Real Usage History Graph",
+        "description": "Implement real usage history graph by replacing AI-generated data with user's actual upload history from Supabase DB.\n1. Create backend function `fetchMonthlyUsageHistory` to query `bill_analyses` table.\n2. Integrate history data into `DashboardPage` and `HistoryDetailPage`.\n3. Update `UsageChart` to display actual history data with current month highlighted.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": [
+          {
+            "id": 1,
+            "title": "Create fetchMonthlyUsageHistory Function",
+            "description": "Develop a backend function to query the bill_analyses table in Supabase.",
+            "dependencies": [],
+            "details": "Create src/history/usage-history.ts with fetchMonthlyUsageHistory function using Supabase client.",
+            "status": "done",
+            "testStrategy": "Test the function by querying the database and verifying the returned data matches expected results."
+          },
+          {
+            "id": 2,
+            "title": "Integrate History Data into DashboardPage",
+            "description": "Update DashboardPage to fetch and display usage history data.",
+            "dependencies": [
+              1
+            ],
+            "details": "Modify DashboardPage to call fetchMonthlyUsageHistory and merge the data with current analysis results.",
+            "status": "done",
+            "testStrategy": "Verify that the DashboardPage displays the correct historical data alongside current analysis results."
+          },
+          {
+            "id": 3,
+            "title": "Integrate History Data into HistoryDetailPage",
+            "description": "Update HistoryDetailPage to include full usage history data.",
+            "dependencies": [
+              1
+            ],
+            "details": "Modify HistoryDetailPage to fetch and display the full history, including the current detail view.",
+            "status": "done",
+            "testStrategy": "Ensure HistoryDetailPage correctly displays the full history and matches the expected detail view."
+          },
+          {
+            "id": 4,
+            "title": "Update UsageChart to Display Actual Data",
+            "description": "Refine UsageChart to display actual usage history with the current month highlighted.",
+            "dependencies": [
+              2,
+              3
+            ],
+            "details": "Update UsageChart logic to handle date sorting and highlight the current month.",
+            "status": "done",
+            "testStrategy": "Test the chart to ensure it displays data correctly and highlights the current month."
+          },
+          {
+            "id": 5,
+            "title": "Test and Validate Full Integration",
+            "description": "Conduct end-to-end testing of the real usage history graph implementation.",
+            "dependencies": [
+              4
+            ],
+            "details": "Perform comprehensive testing to ensure all components work together seamlessly and display accurate data.",
+            "status": "done",
+            "testStrategy": "Conduct user acceptance testing to validate the full integration and ensure all features function as expected."
+          }
+        ]
+      },
+      {
+        "id": 30,
+        "title": "Refine Usage History Graph Logic",
+        "description": "Refine UsageChart logic and data processing:\n1. Deduplicate monthly data in `fetchMonthlyUsageHistory` (keep latest per month).\n2. Implement correct highlighting in `UsageChart` based on a specific date/ID prop, allowing historical records to be highlighted correctly in `HistoryDetailPage`.\n3. Clean up `MonthlyData` type definition.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": []
+      },
+      {
+        "id": 31,
+        "title": "Fix Edge Function Base64 Conversion Error",
+        "description": "Fix `RangeError: Maximum call stack size exceeded` in `analyze-bill` Edge Function caused by unsafe Base64 conversion of large files.\n1. Replace `String.fromCharCode(...new Uint8Array(buffer))` with Deno's standard `encodeBase64` or a buffer-safe alternative.\n2. Deploy the updated function.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": []
+      },
+      {
+        "id": 32,
+        "title": "Relocate Split Bill Button to Summary Card",
+        "description": "Move \"Split Bill\" button from page headers into the \"Current Bill\" card within `SummaryCards` component.\n1. Update `SummaryCards` to accept `onSplitBill` prop and render the button.\n2. Update `DashboardPage` and `HistoryDetailPage` to pass the handler and remove the old button.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": []
+      },
+      {
+        "id": 33,
+        "title": "Refine Split Bill Result with Percentage and Detailed Breakdown",
+        "description": "Improve Split Bill Modal Result View:\n1. Change display from 'vs avg' to '% of Total'.\n2. Add a collapsible 'Calculation Details' section showing the breakdown (Base split + Tag weights).",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": []
+      },
+      {
+        "id": 34,
+        "title": "Implement Save and Share Functionality for Split Bill Result",
+        "description": "Implement 'Save Image' and 'Share Result' functionality in SplitBillModal.\n1. Install html2canvas.\n2. Implement handleSaveImage using html2canvas to capture the modal content.\n3. Implement handleShare using navigator.share (fallback to clipboard copy).",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": []
+      },
+      {
+        "id": 35,
+        "title": "Migrate to html-to-image for Stable Image Saving",
+        "description": "Replace `html2canvas` with `html-to-image` to fix \"unsupported color function 'lab'\" error.\n1. Install `html-to-image`.\n2. Update `handleSaveImage` in `src/components/split-bill-modal.tsx` to use `toPng` from `html-to-image`.\n3. Uninstall `html2canvas`.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": []
+      },
+      {
+        "id": 36,
+        "title": "Support Multi-Page Bill Upload & Analysis",
+        "description": "Implement multi-page bill analysis.\n1. Update UploadCard to support multiple file selection (max 5).\n2. Update uploadBillFile to handle multiple files and return URL array.\n3. Update analyzeBill to send URL array to Edge Function.\n4. Update Edge Function to accept `fileUrls` array and send multiple images to GPT-4o Vision.\n5. Maintain existing DB schema (save only the first URL).",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": []
+      },
+      {
+        "id": 37,
+        "title": "Fix UploadCard Memory Leak & PDF Preview",
+        "description": "Fix memory leak in UploadCard and handle PDF previews.\n1. Use `useEffect` to cleanup object URLs with `URL.revokeObjectURL`.\n2. Add logic to display a PDF icon for .pdf files instead of a broken image.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": []
+      },
+      {
+        "id": 38,
+        "title": "Add Manual Analysis Trigger to UploadCard",
+        "description": "Add 'Analyze Bill' button to UploadCard to prevent auto-analysis.\n1. Modify UploadCard to manage local file state.\n2. Add a button that triggers onFileSelect only when clicked.\n3. Only show the button when files are selected.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": []
+      },
+      {
+        "id": 39,
+        "title": "Personalize AI Action Plan with Bill Data",
+        "description": "Enhance Action Plan personalization and specificity.\n1. Update Edge Function prompt to request specific, data-backed action plans with descriptions.\n2. Update ActionPlanItem type in analyze.ts to include `description`.\n3. Update AIAnalysis UI to display the new description field.\n4. Expand icon types if necessary.",
+        "details": "",
+        "testStrategy": "",
+        "status": "done",
+        "dependencies": [],
+        "priority": "medium",
+        "subtasks": []
+      }
+    ],
+    "metadata": {
+      "created": "2025-11-22T01:33:40.469Z",
+      "updated": "2025-11-22T22:14:12.323Z",
+      "description": "Tasks for master context"
+    }
+  }
+}

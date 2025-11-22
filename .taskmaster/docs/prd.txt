@@ -1,0 +1,633 @@
+# Product Requirements Document (PRD)
+Electricity Bill Analyzer – Hackathon Project
+RPG-Structured, Dependency-Aware PRD (Supabase Edition)
+
+---
+
+# Overview
+
+## Problem Statement
+Most residents have difficulty understanding their electricity bills. Utility bills are inconsistent in format, cluttered with technical terms, and lack actionable insights. Users cannot easily identify why their bill increased, which charges matter most, or what they can do to reduce future costs. Existing solutions are either too generic (static tips) or require manual data entry.
+
+The Electricity Bill Analyzer solves this by allowing users to **upload a bill image**, automatically extracting key information, presenting **clear visual insights**, and providing **AI-generated saving recommendations**. Logged-in users can store and view past analyses through a history dashboard.
+
+## Target Users
+- **Renters / Students**
+  Want quick, simple understanding without reading long bills.
+- **Homeowners**
+  Want cost breakdowns, monthly comparisons, and personalized saving tips.
+- **Eco-conscious users**
+  Care about tracking usage trends and reducing consumption.
+
+## Success Metrics
+- ≥ **90%** extraction accuracy for essential fields (total cost, usage kWh)
+- ≥ **70%** of users complete an analysis within 30 seconds
+- ≥ **50%** of logged-in users revisit History to track trends
+- < **5%** analysis failure rate
+
+---
+
+# Architecture Overview
+
+## System Architecture: Next.js + Supabase
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     FRONTEND (Next.js)                      │
+│  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌─────────┐        │
+│  │ Upload  │  │ Analysis│  │ History │  │  Auth   │        │
+│  │   UI    │  │Dashboard│  │  Page   │  │  Pages  │        │
+│  └────┬────┘  └────┬────┘  └────┬────┘  └────┬────┘        │
+│       │            │            │            │              │
+│       └────────────┴────────────┴────────────┘              │
+│                          │                                  │
+│              ┌───────────┴───────────┐                      │
+│              │   Supabase Client     │                      │
+│              │   @supabase/supabase-js                      │
+│              └───────────┬───────────┘                      │
+└──────────────────────────┼──────────────────────────────────┘
+                           │
+┌──────────────────────────┼──────────────────────────────────┐
+│                    SUPABASE BACKEND                         │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐         │
+│  │  Supabase   │  │  Supabase   │  │  Supabase   │         │
+│  │    Auth     │  │   Storage   │  │  Database   │         │
+│  │  (OAuth)    │  │  (Files)    │  │ (PostgreSQL)│         │
+│  └─────────────┘  └──────┬──────┘  └─────────────┘         │
+│                          │                                  │
+│              ┌───────────┴───────────┐                      │
+│              │  Supabase Edge        │                      │
+│              │  Function             │                      │
+│              │  (analyze-bill)       │                      │
+│              └───────────┬───────────┘                      │
+│                          │                                  │
+│              ┌───────────┴───────────┐                      │
+│              │  OpenAI / Gemini      │                      │
+│              │  Vision API           │                      │
+│              └───────────────────────┘                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Technology Stack
+- **Frontend**: Next.js 14 (App Router)
+- **Backend**: Supabase (100% serverless)
+  - **Supabase Auth**: Email/Password + Google OAuth
+  - **Supabase Storage**: Bill image/PDF file uploads
+  - **Supabase Database**: PostgreSQL for user data & analysis history
+  - **Supabase Edge Functions**: `analyze-bill` function for AI processing
+- **AI**: OpenAI GPT-4 Vision or Google Gemini for OCR + analysis
+- **Styling**: Tailwind CSS
+
+---
+
+# Functional Decomposition (Capabilities → Features)
+
+## Capability: File & Analysis Flow
+Handles ingestion, uploading, and analysis of electricity bills using Supabase infrastructure.
+
+### Feature: File Upload
+- **Description**: Allow users to upload images or PDFs to Supabase Storage.
+- **Inputs**: Image/PDF file
+- **Outputs**: Supabase Storage URL + file metadata
+- **Behavior**:
+  - Validate file type (jpg, png, pdf) and size (max 10MB)
+  - Upload to Supabase Storage bucket `bill-uploads`
+  - Return public URL for the uploaded file
+  - Preview selection, allow re-upload
+
+### Feature: AI Analysis Request
+- **Description**: Invoke Supabase Edge Function to process the uploaded bill.
+- **Inputs**: File URL from Supabase Storage
+- **Outputs**: JSON analysis result
+- **Behavior**:
+  - Call `supabase.functions.invoke("analyze-bill", { body: { fileUrl } })`
+  - Edge Function downloads the file, sends to AI model (OpenAI/Gemini Vision)
+  - AI extracts: total amount, usage kWh, breakdown, comparison, tips
+  - Handle loading states during processing
+
+### Feature: Loading Scenario Display
+- **Description**: Display multi-step analysis progress.
+- **Inputs**: isLoading state from front-end
+- **Outputs**: Progress messaging
+- **Behavior**: Rotate messages such as "Uploading to cloud…", "Extracting text…", "Analyzing charges…", "Generating tips…"
+
+### Feature: Analysis Result Rendering
+- **Description**: Display charts, breakdowns, comparisons, and AI tips.
+- **Inputs**: Analysis JSON result from Edge Function
+- **Outputs**: Dashboard UI
+- **Behavior**: Bind values into cards/graphs, show tips list.
+
+---
+
+## Capability: User Authentication
+Manages user login, session state, and protected routes using Supabase Auth.
+
+### Feature: Login
+- **Description**: Authenticate users via Supabase Auth (email/password or Google OAuth).
+- **Inputs**: Credentials or OAuth redirect
+- **Outputs**: Supabase session (access token + user profile)
+- **Behavior**:
+  - `supabase.auth.signInWithPassword()` for email/password
+  - `supabase.auth.signInWithOAuth({ provider: 'google' })` for Google
+  - Session automatically managed by Supabase client
+  - Update global user state with session data
+
+### Feature: Logout
+- **Description**: Clear Supabase authentication session.
+- **Inputs**: None
+- **Outputs**: Cleared session
+- **Behavior**:
+  - Call `supabase.auth.signOut()`
+  - Clear local user state
+  - Redirect to home page
+
+### Feature: Auth-Based UI Control
+- **Description**: Adjust UI based on Supabase Auth session status.
+- **Inputs**: `supabase.auth.getSession()` result
+- **Outputs**: Conditional rendering
+- **Behavior**:
+  - Show history only when logged in
+  - Protect routes using session check
+  - Listen to `onAuthStateChange` for real-time updates
+
+---
+
+## Capability: History Management
+Stores and displays past bill analyses for logged-in users using Supabase Database.
+
+### Feature: Save Analysis to History
+- **Description**: Store the analysis result in Supabase Database if user is logged in.
+- **Inputs**: Bill analysis JSON, user_id from session
+- **Outputs**: Inserted row in `bill_analyses` table
+- **Behavior**:
+  - `supabase.from('bill_analyses').insert({ user_id, ...analysisData })`
+  - Include file URL reference for future access
+  - Automatic timestamps via database defaults
+
+### Feature: Fetch History List
+- **Description**: Retrieve previous analyses from Supabase Database.
+- **Inputs**: user_id from session
+- **Outputs**: Array of bill analysis summaries
+- **Behavior**:
+  - `supabase.from('bill_analyses').select('*').eq('user_id', userId).order('created_at', { ascending: false })`
+  - Return summary list with id, total_amount, usage_kwh, created_at
+
+### Feature: History Detail Display
+- **Description**: Show a past result using the same component as dashboard.
+- **Inputs**: billId
+- **Outputs**: Full bill analysis data
+- **Behavior**:
+  - `supabase.from('bill_analyses').select('*').eq('id', billId).single()`
+  - Render using same ResultCard and TipsList components
+
+---
+
+# Structural Decomposition (Modules → Files)
+
+```
+src/
+├── lib/
+│   ├── supabase.ts              # Supabase client initialization
+│   └── types.ts                 # TypeScript types for analysis data
+│
+├── auth/
+│   ├── login.ts                 # Supabase Auth login functions
+│   ├── logout.ts                # Supabase Auth logout function
+│   ├── user-state.ts            # Auth state management (React Context)
+│   └── index.ts
+│
+├── analysis/
+│   ├── upload.ts                # Supabase Storage upload logic
+│   ├── analyze.ts               # Edge Function invocation
+│   ├── loading-state.ts         # Loading state management
+│   ├── render-result.ts         # Result formatting utilities
+│   └── index.ts
+│
+├── history/
+│   ├── save.ts                  # Insert to Supabase Database
+│   ├── list.ts                  # Fetch history from Database
+│   ├── detail.ts                # Fetch single analysis detail
+│   └── index.ts
+│
+├── components/
+│   ├── upload-card.tsx          # File upload UI component
+│   ├── result-cards.tsx         # Analysis result display
+│   ├── tips-list.tsx            # AI tips display
+│   ├── history-table.tsx        # History list component
+│   ├── loading-spinner.tsx      # Loading state component
+│   └── index.ts
+│
+├── app/
+│   ├── page.tsx                 # Home / Upload page
+│   ├── login/page.tsx           # Login page
+│   ├── history/page.tsx         # History list page
+│   ├── history/[id]/page.tsx    # History detail page
+│   └── layout.tsx               # Root layout with AuthProvider
+│
+supabase/
+└── functions/
+    └── analyze-bill/
+        └── index.ts             # Edge Function for AI analysis
+```
+
+## Module Definitions
+
+### Module: lib/supabase
+- **Responsibility**: Initialize and export Supabase client
+- **Exports**:
+  - `supabase` - Supabase client instance
+  - `getSession()` - Get current auth session
+
+### Module: auth
+- **Maps to**: User Authentication capability
+- **Responsibility**: Supabase Auth integration
+- **Exports**:
+  - `signIn(email, password)` - Email/password login
+  - `signInWithGoogle()` - Google OAuth login
+  - `signOut()` - Logout
+  - `useUser()` - React hook for user state
+  - `AuthProvider` - Context provider for auth state
+
+### Module: analysis
+- **Maps to**: File & Analysis Flow capability
+- **Exports**:
+  - `uploadBillFile(file)` - Upload to Supabase Storage
+  - `analyzeBill(fileUrl)` - Invoke Edge Function
+  - `formatAnalysisResult(data)` - Format response for UI
+
+### Module: history
+- **Maps to**: History Management capability
+- **Exports**:
+  - `saveAnalysis(userId, data)` - Insert to Database
+  - `fetchHistory(userId)` - Get user's history
+  - `fetchHistoryDetail(billId)` - Get single analysis
+
+---
+
+# Supabase Configuration
+
+## Database Schema
+
+### Table: `bill_analyses`
+```sql
+CREATE TABLE bill_analyses (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
+  file_url TEXT NOT NULL,
+  total_amount DECIMAL(10,2),
+  usage_kwh DECIMAL(10,2),
+  previous_usage_kwh DECIMAL(10,2),
+  breakdown_json JSONB,
+  tips_json JSONB,
+  raw_response JSONB,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Enable Row Level Security
+ALTER TABLE bill_analyses ENABLE ROW LEVEL SECURITY;
+
+-- Policy: Users can only see their own analyses
+CREATE POLICY "Users can view own analyses" ON bill_analyses
+  FOR SELECT USING (auth.uid() = user_id);
+
+-- Policy: Users can insert their own analyses
+CREATE POLICY "Users can insert own analyses" ON bill_analyses
+  FOR INSERT WITH CHECK (auth.uid() = user_id);
+```
+
+## Storage Bucket
+
+### Bucket: `bill-uploads`
+```sql
+-- Create bucket for bill uploads
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('bill-uploads', 'bill-uploads', true);
+
+-- Policy: Authenticated users can upload
+CREATE POLICY "Authenticated users can upload" ON storage.objects
+  FOR INSERT WITH CHECK (
+    bucket_id = 'bill-uploads' AND
+    auth.role() = 'authenticated'
+  );
+
+-- Policy: Public read access for analysis
+CREATE POLICY "Public read access" ON storage.objects
+  FOR SELECT USING (bucket_id = 'bill-uploads');
+```
+
+## Edge Function: `analyze-bill`
+
+```typescript
+// supabase/functions/analyze-bill/index.ts
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+serve(async (req) => {
+  const { fileUrl } = await req.json()
+
+  // Download file from Storage
+  const fileResponse = await fetch(fileUrl)
+  const fileBuffer = await fileResponse.arrayBuffer()
+  const base64Image = btoa(String.fromCharCode(...new Uint8Array(fileBuffer)))
+
+  // Call OpenAI Vision API
+  const openaiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${Deno.env.get('OPENAI_API_KEY')}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'gpt-4-vision-preview',
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Analyze this electricity bill...' },
+          { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64Image}` }}
+        ]
+      }],
+      max_tokens: 1000,
+    }),
+  })
+
+  const result = await openaiResponse.json()
+
+  return new Response(JSON.stringify({
+    total_amount: extractedData.totalAmount,
+    usage_kwh: extractedData.usageKwh,
+    breakdown_json: extractedData.breakdown,
+    tips_json: extractedData.tips,
+  }), {
+    headers: { 'Content-Type': 'application/json' },
+  })
+})
+```
+
+---
+
+# Dependency Graph
+
+## Foundation Layer (Phase 0)
+No dependencies:
+- **lib/supabase** → Supabase client initialization
+- **components/** → Stateless UI components
+- **auth/user-state** → Auth state context using Supabase session
+
+## Phase 1: Authentication Layer
+- **auth/login**, **auth/logout**
+  - Depends on: [lib/supabase, auth/user-state]
+
+## Phase 2: Analysis Layer
+- **analysis/upload**
+  - Depends on: [lib/supabase, components/upload-card]
+- **analysis/analyze**
+  - Depends on: [lib/supabase] (Edge Function invocation)
+- **analysis/render-result**
+  - Depends on: [components/result-cards, components/tips-list]
+
+## Phase 3: History Layer
+- **history/save**
+  - Depends on: [lib/supabase, auth/user-state, analysis/analyze]
+- **history/list**, **history/detail**
+  - Depends on: [lib/supabase, auth/user-state]
+
+**Ordering summary:**
+```
+Foundation (Supabase Client) → Auth → Analysis → History
+```
+
+---
+
+# Implementation Roadmap
+
+### Phase 0 — Foundation (Supabase Setup)
+**Goal**: Set up Supabase project and initialize client in Next.js.
+
+**Tasks**
+- Create Supabase project and configure environment variables
+- Initialize Supabase client in `lib/supabase.ts`
+- Create database schema (bill_analyses table with RLS)
+- Set up Storage bucket (bill-uploads)
+- Create core UI components (UploadCard, ResultCard, TipsList)
+
+**Exit Criteria**
+- Supabase client connects successfully
+- Database table exists with proper RLS policies
+- Storage bucket accepts file uploads
+- UI components render correctly
+
+---
+
+### Phase 1 — Authentication (Supabase Auth)
+**Goal**: Implement authentication using Supabase Auth.
+
+**Tasks**
+- Build login page UI with email/password and Google OAuth buttons
+- Implement `signIn()`, `signInWithGoogle()`, `signOut()` using Supabase Auth
+- Create AuthProvider context with `onAuthStateChange` listener
+- Implement protected route logic
+
+**Exit Criteria**
+- Users can sign up and log in via email or Google
+- Session persists across page reloads
+- Protected routes redirect unauthenticated users
+
+---
+
+### Phase 2 — File Upload & Analysis (Supabase Storage + Edge Functions)
+**Goal**: Enable full analysis flow using Supabase infrastructure.
+
+**Tasks**
+- Implement file upload to Supabase Storage
+- Deploy `analyze-bill` Edge Function with AI integration
+- Implement `analyzeBill()` function that invokes Edge Function
+- Build loading sequence with progress messages
+- Render full dashboard after analysis result
+
+**Exit Criteria**
+- Files upload to Supabase Storage successfully
+- Edge Function processes bills and returns analysis
+- Dashboard displays complete analysis results
+
+---
+
+### Phase 3 — History System (Supabase Database)
+**Goal**: Save and display past analyses using Supabase Database.
+
+**Tasks**
+- Implement `saveAnalysis()` to insert into `bill_analyses` table
+- Build history list page with `fetchHistory()` query
+- Implement history detail view with `fetchHistoryDetail()` query
+- Ensure RLS policies work correctly (users see only their data)
+
+**Exit Criteria**
+- Analysis results save to database automatically
+- History page shows user's past analyses
+- Detail view displays full analysis data
+
+---
+
+# Test Strategy
+
+## Test Pyramid
+```
+        /\
+       /E2E\        15%
+      /------\
+     /Integration\  30%
+    /------------\
+   /  Unit Tests  \ 55%
+```
+
+## Critical Test Scenarios
+
+### Supabase Storage Upload
+- **Happy**: Valid image → uploads to Storage, returns URL
+- **Edge**: Oversized file (>10MB) → graceful error before upload
+- **Error**: Unsupported file type → block upload with message
+
+### Edge Function Analysis
+- Valid bill image → returns all required fields
+- Unclear/blurry bill → returns partial data with warnings
+- Edge Function timeout → displays error toast with retry option
+- Invalid file URL → returns appropriate error
+
+### Supabase Auth
+- Email/password login → creates session, user state updates
+- Google OAuth → redirects, creates session
+- Invalid credentials → shows error message
+- Session expiry → redirects to login
+
+### Database History (with RLS)
+- Logged-in user saves → inserts with correct user_id
+- Fetch history → returns only current user's records
+- Unauthenticated request → blocked by RLS policy
+- History detail → returns correct single record
+
+---
+
+# Risks and Mitigation
+
+### Risk: Supabase Edge Function cold start latency
+- **Mitigation**: Show detailed loading messages to set expectations
+- **Fallback**: Consider Supabase Realtime for progress updates
+
+### Risk: OCR fails on low-quality images
+- **Mitigation**: Validate image quality before upload, show guidelines
+- **Fallback**: Ask user to retry with better resolution
+
+### Risk: Supabase free tier limits
+- **Mitigation**: Monitor usage, implement rate limiting on frontend
+- **Fallback**: Upgrade plan if needed for hackathon demo
+
+### Risk: Time constraints (hackathon)
+- **Mitigation**: Supabase reduces backend complexity significantly
+- **Fallback**: Skip history feature if necessary, focus on core analysis
+
+---
+
+# Environment Variables
+
+```env
+# .env.local
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
+
+# For Edge Function (set in Supabase Dashboard)
+OPENAI_API_KEY=sk-...
+```
+
+---
+
+# Appendix
+
+## References
+- [Supabase Documentation](https://supabase.com/docs)
+- [Supabase Auth with Next.js](https://supabase.com/docs/guides/auth/auth-helpers/nextjs)
+- [Supabase Edge Functions](https://supabase.com/docs/guides/functions)
+- [OpenAI Vision API](https://platform.openai.com/docs/guides/vision)
+- PG&E/SoCal Edison bill formats
+
+## Glossary
+- **OCR**: Optical Character Recognition
+- **LLM**: Large Language Model
+- **kWh**: Kilowatt-hours
+- **RLS**: Row Level Security (Supabase feature)
+- **Edge Function**: Serverless function running on Supabase infrastructure
+
+## Resolved Questions
+- **Will we store images or just extracted text?** → Store in Supabase Storage, reference URL in database
+- **Should History support PDF exports?** → Future enhancement, not MVP
+
+---
+
+# Task-Master Integration Notes
+- All backend operations use Supabase client methods
+- No custom API routes needed (fully serverless)
+- Edge Function handles AI integration securely
+- RLS policies ensure data isolation automatically
+- Capabilities map cleanly to Supabase services:
+  - Auth → Supabase Auth
+  - File Upload → Supabase Storage
+  - Analysis → Supabase Edge Functions
+  - History → Supabase Database
+
+---
+
+# Figma Implementation & UI Enhancements
+
+## Overview
+Based on the finalized Figma designs (Desktop-2 and Desktop-4), the application will feature a polished dashboard and detailed analysis visualization.
+
+## Global UI
+- **Font**: 'Russo One' (Logo), 'Inter' (Body), 'Outfit' (Graphs)
+- **Color Palette**:
+  - Background: #F4F6F8
+  - Primary Green: #2E7D32
+  - Warning Red: #DD0000
+  - Forecast Orange: #F3440F
+  - Text Gray: #888888 / #A6A6A6
+- **Components**:
+  - **Sidebar**: Fixed 260px width, White background.
+    - Logo: "WattGuard" (Green, Russo One)
+    - Menu Items: Dashboard (Icon+Text), History (Icon+Text)
+    - Active state styling
+  - **Header**:
+    - Profile Avatar (Ellipse) top-right
+    - "Login" button (if unauthenticated)
+
+## Dashboard (Desktop-2)
+- **Purpose**: Main entry point for logged-in users to upload bills.
+- **Layout**:
+  - Sidebar on left
+  - Main content area with background #F4F6F8
+  - Centered Upload Card (800x500px)
+    - Dotted border area
+    - Cloud upload icon (Vector)
+    - Text: "drag & drop your bill here", "or click to browse"
+
+## Analysis Results (Desktop-4)
+- **Purpose**: Visualization of the analyzed bill data.
+- **Layout**: Grid-based layout for cards.
+- **Components**:
+  1.  **Summary Cards (Top Row)**:
+      - Current Bill: Amount ($) + vs Last Month (Red/Green indicator)
+      - Current Usage: kWh + Daily Avg
+      - Next Month Forecast: Amount ($) + "Optimized Plan" badge
+  2.  **Monthly Usage Trend (Main Graph)**:
+      - Library: `recharts`
+      - Structure: ComposedChart (Bar + Line)
+      - X-Axis: Months (Jan - Dec)
+      - Y-Axis Left: Usage (kWh) - Bar Chart
+      - Y-Axis Right: Temperature (°C) - Line Chart (Red line)
+      - Tooltip: Custom tooltip showing kWh and Temp
+  3.  **AI Root-Cause Analysis (Right Side)**:
+      - List of 4 key insights (e.g., "Total Usage Surge", "Peak Time Spike")
+      - Icon + Title + Description format
+      - Critical items highlighted in Red
+  4.  **Recommended Action Plan (Bottom Row)**:
+      - 3 Cards: EV Charging, Optimize AC, Laundry Schedule
+      - Each card shows:
+        - Action Title
+        - Potential Savings ($/mo) in Green
+      - "Apply" Button: Changes state to "Applied" on click
