@@ -1,8 +1,8 @@
 export const loadingMessages = [
-    '청구서를 안전하게 업로드하고 있어요...',
-    'AI가 이미지를 분석하고 있어요...',
-    '요금 상세 내역을 추출하는 중입니다...',
-    '전월 사용량과 비교해보고 있어요...',
-    '맞춤형 절약 팁을 생성하고 있습니다...',
-    '거의 다 완료되었습니다!'
+    'Securely uploading your bill...',
+    'AI is analyzing the image...',
+    'Extracting billing details...',
+    'Comparing with previous usage...',
+    'Generating personalized saving tips...',
+    'Almost done!'
   ]
